@@ -107,37 +107,44 @@ class ExtractorBase(TransformerMixin, BaseEstimator):
 
 
 class BuyerClass(ExtractorBase):
+    """
+    gets features from buyer class table and joins it on grantee/buyer_name
+    For liveloop label model ONLY
+    """
 
     builtin_features = [
-        "is_flipper",
         "bad_targets",
         "is_builder",
-        "is_ibuyer",
+        "is_flipper",
         "is_fund",
-        "is_wholesaler",
+        "is_ibuyer",
         "is_landlord",
         "is_service",
+        "is_wholesaler",
     ]
 
     def __init__(
         self,
         input_features=None,
-        buyer_class_table="info_table.json",
+        buyer_class_table="buyer_classifications",
         output_feature_names=None,
-        output_feature_types="categorical"
+        output_feature_types="categorical",
     ):
+        """
+        :param feature: name of feature
+        """
 
         if input_features is None and output_feature_names is None:
             input_features = self.builtin_features
             output_feature_names = self.builtin_features
         else:
-            assert (isinstance(input_features, str) or isinstance(input_features, list))
-            assert (isinstance(output_feature_names, str) or isinstance(output_feature_names, list))
+            assert isinstance(input_features, str) or isinstance(input_features, list)
+            assert isinstance(output_feature_names, str) or isinstance(output_feature_names, list)
 
         super().__init__(
             input_features=input_features,
             output_feature_names=output_feature_names,
-            output_feature_types=output_feature_types
+            output_feature_types=output_feature_types,
         )
 
         # verify inputs
@@ -150,11 +157,41 @@ class BuyerClass(ExtractorBase):
 
     def _transform(self, df: pd.DataFrame):
 
+        # need to check the "grantee", "grantee_mail_address_line_1", and "grantee_mail_address_last_line" columns
+        # in input df.  Just in case the values in those columns are NaN, which will happen if we are using some
+        # preliminary testing live loop table.
+
         for column in ["grantee", "grantee_mail_address_line_1", "grantee_mail_address_last_line"]:
             df[column] = df[column].fillna("NULL")
 
-        with open(self.buyer_class_table, "r") as fp:
-            df_buyer_class = pd.DataFrame.from_dict(json.load(fp))
+        # query table where information exists
+        # this table is small anyway, so retrieving all the data should not too big
+        # map recording date to qtr for historical
+
+        q = """
+        SELECT 
+            buyer_name as grantee,
+            grantee_mail_address_line_1,
+            grantee_mail_address_last_line,
+            {features}
+        FROM {table} 
+        WHERE (
+              is_flipper IS NOT NULL
+              OR bad_targets IS NOT NULL
+              OR is_builder IS NOT NULL
+              OR is_ibuyer IS NOT NULL
+              OR is_fund IS NOT NULL
+              OR is_wholesaler IS NOT NULL
+              OR is_landlord IS NOT NULL
+              OR is_service IS NOT NULL
+            )
+            AND grantee_mail_address_line_1 != ""
+            AND grantee_mail_address_last_line != ""
+        """.format(
+            features=",\n\t".join(self.input_features), table=self.buyer_class_table
+        )
+
+        df_buyer_class = pd.read_sql(sql=q, con=get_engine())
 
         # apply merge by buyer name and address
         df_merge = pd.merge(
@@ -164,20 +201,25 @@ class BuyerClass(ExtractorBase):
             how="left",
         )
         df_merge = df_merge.fillna(-1.)
-        return df_merge[self.get_feature_names()]
 
-    def fit(self, X: pd.DataFrame, y=None, **fit_params):
+        if len(self.get_feature_names()) == 1:
+            return df_merge[self.get_feature_names()].values.reshape(-1, 1)
+        else:
+            return df_merge[self.get_feature_names()].values
+
+    def fit(self, X: pd.DataFrame):
         # check if "grantee", "grantee_mail_address_line_1", and "grantee_mail_address_last_line" are
         # included in the input dataframe
         for column in ["grantee", "grantee_mail_address_line_1", "grantee_mail_address_last_line"]:
             if column not in X.columns:
-                msg = f"feature `{column}` not found in input dataframe"
+                msg = f"feature `{column}` not found in input DataFrame"
                 raise ValueError(msg)
 
         return self
 
-    def transform(self, X: pd.DataFrame):
+    def transform(self, X):
         """transform input df"""
         _X = self._transform(X)
         self._post_transform(_X)
         return _X
+    
