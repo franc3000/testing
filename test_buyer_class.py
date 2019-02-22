@@ -32,8 +32,18 @@ buyer_class = BuyerClass(
     output_feature_names=["is_flipper", "bad_targets", "is_builder"]
 )
 
-df = buyer_class.fit_transform(df_input)
 
-assert df["is_flipper"].values.tolist() == [1, 0, -1, 0, -1]
-assert df["bad_targets"].values.tolist() == [0, 1, -1, 1, -1]
-assert df["is_builder"].values.tolist() == [0, 0, -1, 1, -1]
+def test_is_flipper():
+    df = buyer_class.fit_transform(df_input)
+    assert df["is_flipper"].values.tolist() == [1, 0, -1, 0, -1]
+
+    
+def test_is_bad_targets():
+    df = buyer_class.fit_transform(df_input)
+    assert df["bad_targets"].values.tolist() == [0, 1, -1, 1, -1]
+
+    
+def test_is_builder():
+    df = buyer_class.fit_transform(df_input)
+    assert df["is_builder"].values.tolist() == [0, 0, -1, 1, -1]
+    
